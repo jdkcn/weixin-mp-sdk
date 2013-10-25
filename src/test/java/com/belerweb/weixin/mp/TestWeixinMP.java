@@ -502,10 +502,11 @@ public class TestWeixinMP {
           110, -113, 85, -9, 83, -90, -108, -91, 41, 74, 82, -108, -91, 41, 74, 82, -108, -91, 41,
           74, 82, -65, -1, -39};
 
-  String username =
-      System.getProperty(WeixinMP.CONFIG_USERNAME, System.getenv(WeixinMP.CONFIG_USERNAME));
-  String password =
-      System.getProperty(WeixinMP.CONFIG_PASSWORD, System.getenv(WeixinMP.CONFIG_PASSWORD));
+  String username = "seasky7@homolo.com";
+  //      System.getProperty(WeixinMP.CONFIG_USERNAME, System.getenv(WeixinMP.CONFIG_USERNAME));
+  String password = "homolo2008";
+
+  //      System.getProperty(WeixinMP.CONFIG_PASSWORD, System.getenv(WeixinMP.CONFIG_PASSWORD));
 
   @Test
   public void testGetAccessToken() throws MpException {
@@ -597,13 +598,13 @@ public class TestWeixinMP {
   @Test
   public void testSendText() throws MpException {
     WeixinMP mp = WeixinMP.init(username, password);
-    Assert.assertTrue(mp.sendText("2125943182", "消息来自客户端/酷😭"));
+    Assert.assertTrue(mp.sendText("1429520560", "消息来自客户端/酷😭"));
   }
 
   @Test
   public void testSendImage() throws Exception {
     WeixinMP mp = WeixinMP.init(username, password);
-    Assert.assertTrue(mp.sendImage("2125943182", WeixinMP.IMAGE_JPG, image));
+    Assert.assertTrue(mp.sendImage("1429520560", WeixinMP.IMAGE_JPG, image));
   }
 
   @Test
@@ -615,6 +616,6 @@ public class TestWeixinMP {
   @Test
   public void testSendImageText() throws Exception {
     WeixinMP mp = WeixinMP.init(username, password);
-    Assert.assertTrue(mp.sendImageText("2125943182", 10000016));
+    Assert.assertTrue(mp.sendImageText("1429520560", 10000016));
   }
 }
