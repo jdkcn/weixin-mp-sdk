@@ -112,7 +112,7 @@ public class TestWeixinMP {
   @Test
   public void testSendText() throws MpException {
     WeixinMP mp = WeixinMP.init(username, password);
-    Assert.assertTrue(mp.sendText("1429520560", "消息来自客户端/酷😭槑"));
+    Assert.assertTrue(mp.sendText("1429520560", "消息来自客户端/酷😭"));
   }
 
   @Test
