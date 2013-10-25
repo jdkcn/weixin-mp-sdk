@@ -1,6 +1,8 @@
 package com.belerweb.weixin.mp;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -10,16 +12,25 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.HttpException;
-import org.apache.commons.httpclient.HttpMethod;
-import org.apache.commons.httpclient.HttpStatus;
-import org.apache.commons.httpclient.NameValuePair;
-import org.apache.commons.httpclient.cookie.CookiePolicy;
-import org.apache.commons.httpclient.methods.GetMethod;
-import org.apache.commons.httpclient.methods.PostMethod;
-import org.apache.commons.httpclient.methods.multipart.MultipartRequestEntity;
-import org.apache.commons.httpclient.methods.multipart.Part;
+import org.apache.commons.io.IOUtils;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpStatus;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpRequestBase;
+import org.apache.http.client.params.ClientPNames;
+import org.apache.http.client.params.CookiePolicy;
+import org.apache.http.entity.mime.MultipartEntity;
+import org.apache.http.entity.mime.content.ByteArrayBody;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.params.BasicHttpParams;
+import org.apache.http.params.HttpConnectionParams;
+import org.apache.http.params.HttpParams;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -55,9 +66,11 @@ public class WeixinMP {
   private WeixinMP(String username, String password) {
     this.username = username;
     this.password = password;
-    httpClient = new HttpClient();
-    httpClient.getParams().setCookiePolicy(CookiePolicy.BROWSER_COMPATIBILITY);
-    httpClient.getParams().setParameter("http.protocol.single-cookie-header", true);
+    HttpParams httpParams = new BasicHttpParams();
+    httpParams.setParameter("http.protocol.single-cookie-header", true);
+    httpParams.setParameter(ClientPNames.COOKIE_POLICY, CookiePolicy.BROWSER_COMPATIBILITY);
+    HttpConnectionParams.setConnectionTimeout(httpParams, 10000);
+    httpClient = new DefaultHttpClient(httpParams);
   }
 
   /**
@@ -72,12 +85,11 @@ public class WeixinMP {
    */
   public AccessToken getAccessToken(String grantType, String appid, String secret)
       throws MpException {
-    GetMethod request = new GetMethod("https://api.weixin.qq.com/cgi-bin/token");
-    NameValuePair[] params = new NameValuePair[3];
-    params[0] = new NameValuePair("grant_type", grantType);
-    params[1] = new NameValuePair("appid", appid);
-    params[2] = new NameValuePair("secret", secret);
-    request.setQueryString(params);
+    StringBuilder sb = new StringBuilder("https://api.weixin.qq.com/cgi-bin/token");
+    sb.append("?grant_type=").append(grantType);
+    sb.append("&appid=").append(appid);
+    sb.append("&secret=").append(secret);
+    HttpGet request = new HttpGet(sb.toString());
     return new AccessToken(toJsonObject(execute(request)));
   }
 
@@ -90,7 +102,6 @@ public class WeixinMP {
       mp.login();
       MP.put(username, mp);
     }
-
     return MP.get(username);
   }
 
@@ -107,13 +118,21 @@ public class WeixinMP {
    * 登录
    */
   private void login() throws MpException {
-    PostMethod request = new PostMethod("https://mp.weixin.qq.com/cgi-bin/login");
-    request.addParameter("X-Requested-With", "XMLHttpRequest");
-    request.addParameter(new NameValuePair("lang", "zh_CN"));
-    request.addParameter(new NameValuePair("f", "json"));
-    request.addParameter(new NameValuePair("imgcode", ""));
-    request.addParameter(new NameValuePair("username", username));
-    request.addParameter(new NameValuePair("pwd", DigestUtils.md5Hex(password)));
+    HttpPost request = new HttpPost("https://mp.weixin.qq.com/cgi-bin/login");
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("X-Requested-With", "XMLHttpRequest"));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("f", "json"));
+    nvps.add(new BasicNameValuePair("imgcode", ""));
+    nvps.add(new BasicNameValuePair("username", username));
+    nvps.add(new BasicNameValuePair("pwd", DigestUtils.md5Hex(password)));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
+    request.setEntity(httpEntity);
 
     /**
      * 正确结果示例:
@@ -146,15 +165,13 @@ public class WeixinMP {
    */
   public List<WeixinMessage> getMessage(int offset, int count) throws MpException {
     checkToken();
-    String url = "https://mp.weixin.qq.com/cgi-bin/message";
-    GetMethod request = new GetMethod(url);
-    NameValuePair[] params = new NameValuePair[5];
-    params[0] = new NameValuePair("token", token);// 必须
-    params[1] = new NameValuePair("lang", "zh_CN");// 必须
-    params[2] = new NameValuePair("day", "7");// 全部消息
-    params[3] = new NameValuePair("offset", String.valueOf(offset));
-    params[4] = new NameValuePair("count", String.valueOf(count));
-    request.setQueryString(params);
+    StringBuffer sb = new StringBuffer("https://mp.weixin.qq.com/cgi-bin/message");
+    sb.append("?token=").append(token);
+    sb.append("&lang=").append("zh_CN");
+    sb.append("&day=").append("7");
+    sb.append("&offset=").append(String.valueOf(offset));
+    sb.append("&count=").append(String.valueOf(count));
+    HttpGet request = new HttpGet(sb.toString());
     List<WeixinMessage> messages = new ArrayList<WeixinMessage>();
     for (String line : execute(request).split("[\r\n]+")) {
       line = line.trim();
@@ -178,16 +195,14 @@ public class WeixinMP {
    */
   public List<WeixinUser> getUser(int groupId, int pageidx, int pagesize) throws MpException {
     checkToken();
-    String url = "https://mp.weixin.qq.com/cgi-bin/contactmanage";
-    GetMethod request = new GetMethod(url);
-    NameValuePair[] params = new NameValuePair[6];
-    params[0] = new NameValuePair("token", token);
-    params[1] = new NameValuePair("lang", "zh_CN");
-    params[2] = new NameValuePair("type", "0");
-    params[3] = new NameValuePair("groupid", String.valueOf(groupId));
-    params[4] = new NameValuePair("pageidx", String.valueOf(pageidx));
-    params[5] = new NameValuePair("pagesize", String.valueOf(pagesize));
-    request.setQueryString(params);
+    StringBuffer sb = new StringBuffer("https://mp.weixin.qq.com/cgi-bin/contactmanage");
+    sb.append("?token=").append(token);
+    sb.append("&lang=").append("zh_CN");
+    sb.append("&type=").append("0");
+    sb.append("&groupid=").append(String.valueOf(groupId));
+    sb.append("&pageidx=").append(String.valueOf(pageidx));
+    sb.append("&pagesize=").append(String.valueOf(pagesize));
+    HttpGet request = new HttpGet(sb.toString());
     List<WeixinUser> users = new ArrayList<WeixinUser>();
     for (String line : execute(request).split("[\r\n]+")) {
       line = line.trim();
@@ -212,11 +227,19 @@ public class WeixinMP {
   public WeixinUser getUser(String fakeId) throws MpException {
     checkToken();
     String url = "https://mp.weixin.qq.com/cgi-bin/getcontactinfo";
-    PostMethod request = new PostMethod(url);
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-getcontactinfo");
-    request.addParameter("fakeid", fakeId);
+    HttpPost request = new HttpPost(url);
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-getcontactinfo"));
+    nvps.add(new BasicNameValuePair("fakeid", fakeId));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return new WeixinUser(toJsonObject(execute(request)));
   }
 
@@ -226,13 +249,21 @@ public class WeixinMP {
   public boolean putIntoGroup(List<String> fakeIds, int groupId) throws MpException {
     checkToken();
     String url = "https://mp.weixin.qq.com/cgi-bin/modifycontacts";
-    PostMethod request = new PostMethod(url);
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-putinto-group");
-    request.addParameter("action", "modifycontacts");
-    request.addParameter("tofakeidlist", StringUtil.join(fakeIds, "|"));
-    request.addParameter("contacttype", String.valueOf(groupId));
+    HttpPost request = new HttpPost(url);
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-putinto-group"));
+    nvps.add(new BasicNameValuePair("action", "modifycontacts"));
+    nvps.add(new BasicNameValuePair("tofakeidlist", StringUtil.join(fakeIds, "|")));
+    nvps.add(new BasicNameValuePair("contacttype", String.valueOf(groupId)));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return "0".equals(toJsonObject(execute(request)).optString("ret"));
   }
 
@@ -242,12 +273,20 @@ public class WeixinMP {
   public boolean addGroup(String name) throws MpException {
     checkToken();
     String url = "https://mp.weixin.qq.com/cgi-bin/modifygroup";
-    PostMethod request = new PostMethod(url);
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-friend-group");
-    request.addParameter("func", "add");
-    request.addParameter("name", name);
+    HttpPost request = new HttpPost(url);
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-friend-group"));
+    nvps.add(new BasicNameValuePair("func", "add"));
+    nvps.add(new BasicNameValuePair("name", name));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return toJsonObject(execute(request)).optString("GroupId", null) != null;
   }
 
@@ -257,13 +296,21 @@ public class WeixinMP {
   public boolean renameGroup(int groupId, String name) throws MpException {
     checkToken();
     String url = "https://mp.weixin.qq.com/cgi-bin/modifygroup";
-    PostMethod request = new PostMethod(url);
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-friend-group");
-    request.addParameter("func", "rename");
-    request.addParameter("id", String.valueOf(groupId));
-    request.addParameter("name", name);
+    HttpPost request = new HttpPost(url);
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-friend-group"));
+    nvps.add(new BasicNameValuePair("func", "rename"));
+    nvps.add(new BasicNameValuePair("id", String.valueOf(groupId)));
+    nvps.add(new BasicNameValuePair("name", name));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return toJsonObject(execute(request)).optString("GroupId", null) != null;
   }
 
@@ -273,12 +320,20 @@ public class WeixinMP {
   public boolean deleteGroup(int groupId) throws MpException {
     checkToken();
     String url = "https://mp.weixin.qq.com/cgi-bin/modifygroup";
-    PostMethod request = new PostMethod(url);
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-friend-group");
-    request.addParameter("func", "del");
-    request.addParameter("id", String.valueOf(groupId));
+    HttpPost request = new HttpPost(url);
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-friend-group"));
+    nvps.add(new BasicNameValuePair("func", "del"));
+    nvps.add(new BasicNameValuePair("id", String.valueOf(groupId)));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return toJsonObject(execute(request)).optString("GroupId", null) != null;
   }
 
@@ -288,39 +343,58 @@ public class WeixinMP {
   public boolean sendText(String fakeId, String content) throws MpException {
     checkToken();
     String url = "https://mp.weixin.qq.com/cgi-bin/singlesend";
-    PostMethod request = new PostMethod(url);
-    request.addRequestHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/singlemsgpage");
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-response");
-    request.addParameter("error", "false");
-    request.addParameter("imgcode", "");
-    request.addParameter("ajax", "1");
-    request.addParameter("type", "1");// 文字
-    request.addParameter("tofakeid", fakeId);
-    request.addParameter("content", content);
+    HttpPost request = new HttpPost(url);
+    request.addHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/singlemsgpage");
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-response"));
+    nvps.add(new BasicNameValuePair("error", "false"));
+    nvps.add(new BasicNameValuePair("imgcode", ""));
+    nvps.add(new BasicNameValuePair("ajax", "1"));
+    nvps.add(new BasicNameValuePair("type", "1"));// 文字
+    nvps.add(new BasicNameValuePair("tofakeid", fakeId));
+    nvps.add(new BasicNameValuePair("content", content));
+    nvps.add(new BasicNameValuePair("pwd", DigestUtils.md5Hex(password)));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return toJsonObject(execute(request)).optInt("ret", -1) == 0;
   }
 
   /**
    * 发送图片消息
+   * @param fileName
    */
-  public boolean sendImage(String fakeId, String type, byte[] imageData) throws MpException {
+  public boolean sendImage(String fakeId, String type, InputStream inputStream, String fileName)
+      throws MpException {
     checkToken();
-    int fileid = uploadImage(type, imageData);
+    int fileid = uploadImage(type, inputStream, fileName);
     String url = "https://mp.weixin.qq.com/cgi-bin/singlesend";
-    PostMethod request = new PostMethod(url);
-    request.addRequestHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/singlemsgpage");
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-response");
-    request.addParameter("error", "false");
-    request.addParameter("imgcode", "");
-    request.addParameter("ajax", "1");
-    request.addParameter("type", "2");// 图片
-    request.addParameter("tofakeid", fakeId);
-    request.addParameter("fid", String.valueOf(fileid));
-    request.addParameter("fileid", String.valueOf(fileid));
+    HttpPost request = new HttpPost(url);
+    request.addHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/singlemsgpage");
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-response"));
+    nvps.add(new BasicNameValuePair("error", "false"));
+    nvps.add(new BasicNameValuePair("imgcode", ""));
+    nvps.add(new BasicNameValuePair("ajax", "1"));
+    nvps.add(new BasicNameValuePair("type", "2"));// 图片
+    nvps.add(new BasicNameValuePair("tofakeid", fakeId));
+    nvps.add(new BasicNameValuePair("fid", String.valueOf(fileid)));
+    nvps.add(new BasicNameValuePair("fileid", String.valueOf(fileid)));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     boolean result = toJsonObject(execute(request)).optInt("ret", -1) == 0;
     deleteFile(fileid);
     return result;
@@ -329,18 +403,26 @@ public class WeixinMP {
   public boolean sendImageText(String fakeId, int appMsgId) throws MpException {
     checkToken();
     String url = "https://mp.weixin.qq.com/cgi-bin/singlesend";
-    PostMethod request = new PostMethod(url);
-    request.addRequestHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/singlemsgpage");
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-response");
-    request.addParameter("error", "false");
-    request.addParameter("imgcode", "");
-    request.addParameter("ajax", "1");
-    request.addParameter("type", "10");// 图文
-    request.addParameter("tofakeid", fakeId);
-    request.addParameter("fid", String.valueOf(appMsgId));
-    request.addParameter("appmsgid", String.valueOf(appMsgId));
+    HttpPost request = new HttpPost(url);
+    request.addHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/singlemsgpage");
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-response"));
+    nvps.add(new BasicNameValuePair("error", "false"));
+    nvps.add(new BasicNameValuePair("imgcode", ""));
+    nvps.add(new BasicNameValuePair("ajax", "1"));
+    nvps.add(new BasicNameValuePair("type", "10"));// 图文
+    nvps.add(new BasicNameValuePair("tofakeid", fakeId));
+    nvps.add(new BasicNameValuePair("fid", String.valueOf(appMsgId)));
+    nvps.add(new BasicNameValuePair("appmsgid", String.valueOf(appMsgId)));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return toJsonObject(execute(request)).optInt("ret", -1) == 0;
   }
 
@@ -359,23 +441,31 @@ public class WeixinMP {
       String digest, String content, String source) throws MpException {
     checkToken();
     String url = "https://mp.weixin.qq.com/cgi-bin/operate_appmsg";
-    PostMethod request = new PostMethod(url);
-    // request.setRequestHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/operate_appmsg");
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-response");
-    request.addParameter("error", "false");
-    request.addParameter("ajax", "1");
-    request.addParameter("sub", "create");
-    request.addParameter("count", "1");
-    request.addParameter("AppMsgId", appMsgId == null ? "" : String.valueOf(appMsgId));
-    request.addParameter("title0", title);
-    request.addParameter("author0", author == null ? "" : author);
-    request.addParameter("fileid0", String.valueOf(fileId));// 大图片建议尺寸：720像素 * 400像素封面
-    request.addParameter("author0", author == null ? "" : author);
-    request.addParameter("digest0", digest == null ? "" : digest);
-    request.addParameter("content0", content);
-    request.addParameter("sourceurl0", source == null ? "" : source);
+    HttpPost request = new HttpPost(url);
+    //    request.addHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/operate_appmsg");
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-response"));
+    nvps.add(new BasicNameValuePair("error", "false"));
+    nvps.add(new BasicNameValuePair("imgcode", ""));
+    nvps.add(new BasicNameValuePair("ajax", "1"));
+    nvps.add(new BasicNameValuePair("sub", "create"));
+    nvps.add(new BasicNameValuePair("count", "1"));
+    nvps.add(new BasicNameValuePair("AppMsgId", appMsgId == null ? "" : String.valueOf(appMsgId)));
+    nvps.add(new BasicNameValuePair("title0", title));
+    nvps.add(new BasicNameValuePair("author0", author == null ? "" : author));
+    nvps.add(new BasicNameValuePair("fileid0", String.valueOf(fileId)));// 大图片建议尺寸：720像素 * 400像素封面
+    nvps.add(new BasicNameValuePair("digest0", digest == null ? "" : digest));
+    nvps.add(new BasicNameValuePair("content0", content));
+    nvps.add(new BasicNameValuePair("sourceurl0", source == null ? "" : source));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return toJsonObject(execute(request)).optInt("ret", -1) == 0;
   }
 
@@ -384,40 +474,51 @@ public class WeixinMP {
    */
   public boolean deleteImageText(int appMsgId) throws MpException {
     String url = "https://mp.weixin.qq.com/cgi-bin/operate_appmsg";
-    PostMethod request = new PostMethod(url);
-    request.addParameter("token", token);
-    // request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-response");
-    request.addParameter("ajax", "1");
-    request.addParameter("sub", "del");
-    request.addParameter("AppMsgId", String.valueOf(appMsgId));
+    HttpPost request = new HttpPost(url);
+    request.addHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/singlemsgpage");
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    //    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-response"));
+    nvps.add(new BasicNameValuePair("ajax", "1"));
+    nvps.add(new BasicNameValuePair("sub", "del"));// 文字
+    nvps.add(new BasicNameValuePair("AppMsgId", String.valueOf(appMsgId)));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return toJsonObject(execute(request)).optInt("ret", -1) == 0;
   }
 
   /**
    * 上传图片
+   * @param fileName
    */
-  private int uploadImage(String type, byte[] image) throws MpException {
+  private int uploadImage(String type, InputStream inputStream, String fileName) throws MpException {
     checkToken();
-    String url = "https://mp.weixin.qq.com/cgi-bin/uploadmaterial";
-    url = url + "?token=" + token;
-    url = url + "&lang=zh_CN";
-    url = url + "&t=iframe-uploadfile";
-    url = url + "&cgi=uploadmaterial";
-    url = url + "&type=0";
-    url = url + "&formId=";// "file_from_" + System.currentTimeMillis()
-    PostMethod request = new PostMethod(url);
-    request.addRequestHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/indexpage");
+    StringBuilder sb = new StringBuilder("https://mp.weixin.qq.com/cgi-bin/uploadmaterial");
+    sb.append("?token=").append(token);
+    sb.append("&lang=zh_CN");
+    sb.append("&t=iframe-uploadfile");
+    sb.append("&cgi=uploadmaterial");
+    sb.append("&type=0");
+    sb.append("&formId=null");// "file_from_" + System.currentTimeMillis()
+    HttpPost request = new HttpPost(sb.toString());
+    request.addHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/indexpage");
     try {
-      Part[] parts = new Part[] {new ByteArrayPart(image, "uploadfile", type)};
-      MultipartRequestEntity entry = new MultipartRequestEntity(parts, request.getParams());
-      request.setRequestEntity(entry);
+      MultipartEntity httpEntity = new MultipartEntity();
+      httpEntity.addPart("uploadfile", new ByteArrayBody(IOUtils.toByteArray(inputStream), type,
+          fileName));
+      request.setEntity(httpEntity);
       String html = execute(request, false);
       Matcher matcher = Pattern.compile("'(\\d+)'").matcher(html);
       if (html.contains("上传成功") && matcher.find()) {
         return Integer.parseInt(matcher.group(1));
       }
-    } catch (IOException e) {
+    } catch (Exception e) {
       throw new MpException(e);
     }
 
@@ -429,39 +530,47 @@ public class WeixinMP {
    */
   private boolean deleteFile(int fileid) throws MpException {
     String url = "https://mp.weixin.qq.com/cgi-bin/modifyfile";
-    PostMethod request = new PostMethod(url);
-    request.addParameter("token", token);
-    request.addParameter("lang", "zh_CN");
-    request.addParameter("t", "ajax-response");
-    request.addParameter("ajax", "1");
-    request.addParameter("oper", "del");
-    request.addParameter("fileid", String.valueOf(fileid));
+    HttpPost request = new HttpPost(url);
+    request.addHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/singlemsgpage");
+    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+    nvps.add(new BasicNameValuePair("token", token));
+    nvps.add(new BasicNameValuePair("lang", "zh_CN"));
+    nvps.add(new BasicNameValuePair("t", "ajax-response"));
+    nvps.add(new BasicNameValuePair("ajax", "1"));
+    nvps.add(new BasicNameValuePair("oper", "del"));
+    nvps.add(new BasicNameValuePair("fileid", String.valueOf(fileid)));
+    HttpEntity httpEntity;
+    try {
+      httpEntity = new UrlEncodedFormEntity(nvps, "UTF-8");
+      request.setEntity(httpEntity);
+    } catch (UnsupportedEncodingException e) {
+      throw new MpException(e);
+    }
     return toJsonObject(execute(request)).optInt("ret", -1) == 0;
   }
 
-  private String execute(HttpMethod request) throws MpException {
+  private String execute(HttpRequestBase request) throws MpException {
     return execute(request, true);
   }
 
-  private String execute(HttpMethod request, boolean form) throws MpException {
-    request.addRequestHeader("Pragma", "no-cache");
-    request.addRequestHeader("User-Agent",
+  private String execute(HttpRequestBase request, boolean form) throws MpException {
+    request.addHeader("Pragma", "no-cache");
+    request.addHeader("User-Agent",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:23.0) Gecko/20100101 Firefox/23.0");
-    if (form && request instanceof PostMethod) {
-      request.addRequestHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+    if (form && request instanceof HttpPost) {
+      request.addHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
     }
-    if (request.getRequestHeader("Referer") == null) {
-      request.addRequestHeader("Referer", "https://mp.weixin.qq.com/");
+    if (request.getHeaders("Referer") == null || request.getHeaders("Referer").length == 0) {
+      request.addHeader("Referer", "https://mp.weixin.qq.com/");
     }
 
     try {
-      int status = httpClient.executeMethod(request);
-      if (status != HttpStatus.SC_OK) {
-        throw new MpException(MpException.DEFAULT_CODE, String.valueOf(status));
+      HttpResponse response = httpClient.execute(request);
+      if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {
+        throw new MpException(MpException.DEFAULT_CODE, String.valueOf(response.getStatusLine()
+            .getStatusCode()));
       }
-      return request.getResponseBodyAsString();
-    } catch (HttpException e) {
-      throw new MpException(e);
+      return new StringResponseHandler("UTF-8").handleResponse(response);
     } catch (IOException e) {
       throw new MpException(e);
     }

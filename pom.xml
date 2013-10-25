@@ -11,7 +11,7 @@
 
 	<groupId>com.belerweb</groupId>
 	<artifactId>weixin-mp-sdk</artifactId>
-	<version>1.0.0-preview-2</version>
+	<version>1.0.0-SNAPSHOT</version>
 
 	<name>weixin-mp-sdk</name>
 	<description>Weixin mp SDK</description>
@@ -51,9 +51,16 @@
 
 	<dependencies>
 		<dependency>
-			<groupId>commons-httpclient</groupId>
-			<artifactId>commons-httpclient</artifactId>
-			<version>3.1</version>
+			<groupId>org.apache.httpcomponents</groupId>
+			<artifactId>httpclient</artifactId>
+			<version>4.1.2</version>
+			<scope>compile</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.httpcomponents</groupId>
+			<artifactId>httpmime</artifactId>
+			<version>4.1.2</version>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.json</groupId>
@@ -64,6 +71,13 @@
 			<groupId>org.jsoup</groupId>
 			<artifactId>jsoup</artifactId>
 			<version>1.7.2</version>
+		</dependency>
+		<dependency>
+			<groupId>commons-io</groupId>
+			<artifactId>commons-io</artifactId>
+			<version>2.4</version>
+			<type>jar</type>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>junit</groupId>
