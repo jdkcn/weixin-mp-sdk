@@ -1,18 +1,6 @@
 package com.belerweb.weixin.mp;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UnsupportedEncodingException;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -35,6 +23,14 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.jsoup.helper.StringUtil;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 微信公众平台
@@ -510,8 +506,7 @@ public class WeixinMP {
     request.addHeader("Referer", "https://mp.weixin.qq.com/cgi-bin/indexpage");
     try {
       MultipartEntity httpEntity = new MultipartEntity();
-      httpEntity.addPart("uploadfile", new ByteArrayBody(IOUtils.toByteArray(inputStream), type,
-          fileName));
+      httpEntity.addPart("uploadfile", new ByteArrayBody(toByte(inputStream), type, fileName));
       request.setEntity(httpEntity);
       String html = execute(request, false);
       Matcher matcher = Pattern.compile("'(\\d+)'").matcher(html);
@@ -582,6 +577,24 @@ public class WeixinMP {
     } catch (JSONException e) {
       throw new MpException(e);
     }
+  }
+
+  public byte[] toByte(InputStream inputStream) throws IOException {
+    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+    byte[] buffer = new byte[4069];
+    try {
+      int read = 0;
+      while ((read = inputStream.read(buffer)) != -1) {
+        outputStream.write(buffer, 0, read);
+      }
+    } finally {
+      try {
+        outputStream.close();
+      } catch (IOException ex) {
+        //quiet
+      }
+    }
+    return outputStream.toByteArray();
   }
 
 }
